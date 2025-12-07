@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>RabbitMQ Crypto Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: 'Courier New', monospace; background: #1e1e1e; color: #00ff00; padding: 20px; }
+        .container { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        .box { border: 1px solid #333; padding: 15px; background: #252526; }
+        h2 { border-bottom: 1px solid #00ff00; padding-bottom: 5px; }
+        #logs { height: 400px; overflow-y: scroll; font-size: 12px; }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #444; }
+        .key { color: #ffff00; font-weight: bold; }
+        .alert { color: #ff0000; font-weight: bold; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <h1>🐰 RabbitMQ Crypto Monitor</h1>
+    
+    <div class="container">
+        <div class="box">
+            <h2>📈 Cours en Temps Réel (Flux: price.*)</h2>
+            <canvas id="cryptoChart"></canvas>
+            
+            <div id="alertBox" style="margin-top: 20px; display:none; border: 2px solid red; padding: 10px;">
+                <h3 style="color:red">⚠️ ALERTE DÉTECTÉE (Flux: alert.critical)</h3>
+                <p id="alertMessage">--</p>
+            </div>
+        </div>
+
+        <div class="box">
+            <h2>🔍 Audit Log (Flux: #)</h2>
+            <p>Vue brute de tous les messages RabbitMQ :</p>
+            <div id="logs"></div>
+        </div>
+    </div>
+
+    <div class="box" style="margin-top: 20px;">
+        <h2>🎓 Pédagogie & Formules</h2>
+        <p><strong>Formule Worker :</strong> Variation = ((Prix - Ancien) / Ancien) * 100</p>
+        <p>Le <em>Worker</em> analyse les prix en arrière-plan. S'il détecte une anomalie, il injecte un nouveau message dans RabbitMQ que le site web intercepte.</p>
+    </div>
+
+    <script>
+        const socket = io();
+        const ctx = document.getElementById('cryptoChart').getContext('2d');
+        
+        // Configuration Chart.js
+        const chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    { label: 'BTC', borderColor: 'orange', data: [] },
+                    { label: 'ETH', borderColor: 'cyan', data: [] }
+                ]
+            },
+            options: { animation: false }
+        });
+
+        const logsDiv = document.getElementById('logs');
+        const alertBox = document.getElementById('alertBox');
+
+        socket.on('rabbitmq_message', (msg) => {
+            // 1. Mise à jour des Logs (Audit)
+            const logItem = document.createElement('div');
+            logItem.className = 'log-entry';
+            logItem.innerHTML = `<span class="key">[${msg.key}]</span> ${JSON.stringify(msg.data)}`;
+            logsDiv.prepend(logItem);
+
+            // 2. Traitement des prix (Visualisation)
+            if (msg.key.startsWith('price.')) {
+                const time = new Date().toLocaleTimeString();
+                if (msg.key === 'price.btc') {
+                    if (chart.data.labels.length > 20) chart.data.labels.shift();
+                    if (chart.data.datasets[0].data.length > 20) chart.data.datasets[0].data.shift();
+                    chart.data.labels.push(time);
+                    chart.data.datasets[0].data.push(msg.data.price);
+                } else if (msg.key === 'price.eth') {
+                    if (chart.data.datasets[1].data.length > 20) chart.data.datasets[1].data.shift();
+                    chart.data.datasets[1].data.push(msg.data.price);
+                }
+                chart.update();
+            }
+
+            // 3. Gestion des alertes (Feedback Visuel)
+            if (msg.key.startsWith('alert.')) {
+                alertBox.style.display = 'block';
+                document.getElementById('alertMessage').innerText = msg.data.message;
+                setTimeout(() => { alertBox.style.display = 'none'; }, 5000);
+            }
+        });
+    </script>
+</body>
+</html>
